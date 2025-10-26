@@ -112,13 +112,23 @@ export default function Dashboard() {
   async function collectMetrics() {
     setCollecting(true)
     try {
+      if (!API_URL) {
+        throw new Error('NEXT_PUBLIC_API_URL environment variable is not set')
+      }
+      
       const response = await fetch(`${API_URL}/collect_metrics`, { method: 'POST' })
+      
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`HTTP ${response.status}: ${errorText}`)
+      }
+      
       const data = await response.json()
       alert(`Collected metrics for ${data.workloads_processed} workloads`)
       fetchData()
     } catch (error) {
       console.error('Error collecting metrics:', error)
-      alert('Error collecting metrics')
+      alert(`Error collecting metrics: ${(error as Error).message}`)
     }
     setCollecting(false)
   }
@@ -126,13 +136,23 @@ export default function Dashboard() {
   async function analyzeWorkloads() {
     setAnalyzing(true)
     try {
+      if (!API_URL) {
+        throw new Error('NEXT_PUBLIC_API_URL environment variable is not set')
+      }
+      
       const response = await fetch(`${API_URL}/analyze`, { method: 'POST' })
+      
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`HTTP ${response.status}: ${errorText}`)
+      }
+      
       const data = await response.json()
       alert(`Created ${data.opportunities_created} new opportunities`)
       fetchData()
     } catch (error) {
       console.error('Error analyzing workloads:', error)
-      alert('Error analyzing workloads')
+      alert(`Error analyzing workloads: ${(error as Error).message}`)
     }
     setAnalyzing(false)
   }

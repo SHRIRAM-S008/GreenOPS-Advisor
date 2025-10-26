@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "7860:7860"
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+      - PROMETHEUS_URL=http://prometheus:9090
+      - OPENCOST_URL=http://opencost:9003
+      - KEPLER_URL=http://kepler:9102
+      - OLLAMA_URL=http://ollama:11434
+      - CLUSTER_NAME=minikube-demo
+      - CARBON_INTENSITY_G_PER_KWH=475
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - prometheus
+      - kepler
+      - ollama
+    networks:
+      - greenops-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_KEY}
+      - NEXT_PUBLIC_API_URL=http://backend:7860
+    env_file:
+      - ./frontend/.env.local
+    depends_on:
+      - backend
+    networks:
+      - greenops-network
+
+  # Note: These services would typically be external to the docker-compose setup
+  # This is just for demonstration purposes
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    networks:
+      - greenops-network
+
+  kepler:
+    image: quay.io/sustainable_computing_io/kepler:latest
+    ports:
+      - "9102:9102"
+    networks:
+      - greenops-network
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    networks:
+      - greenops-network
+
+networks:
+  greenops-network:
+    driver: bridge

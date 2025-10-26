@@ -1,0 +1,14 @@
+opencost:
+  exporter:
+    defaultClusterId: "minikube-demo"
+  env:
+    - name: "PROMETHEUS_SERVER_ENDPOINT"
+      value: "http://prometheus-kube-prometheus-prometheus.monitoring.svc:9090"
+  prometheus:
+    server: "http://prometheus-kube-prometheus-prometheus.monitoring.svc:9090"
+prometheus:
+  external:
+    enabled: true
+    url: "http://prometheus-kube-prometheus-prometheus.monitoring.svc:9090"
+  internal:
+    enabled: false

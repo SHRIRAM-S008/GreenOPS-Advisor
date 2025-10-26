@@ -1,0 +1,19 @@
+- job_name: 'opencost'
+  honor_labels: true
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  metrics_path: /metrics
+  scheme: http
+  static_configs:
+  - targets:
+    - opencost.opencost.svc:9003
+
+- job_name: 'kepler'
+  honor_labels: true
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  metrics_path: /metrics
+  scheme: http
+  static_configs:
+  - targets:
+    - kepler.kepler.svc:9102

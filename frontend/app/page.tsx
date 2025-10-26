@@ -5,15 +5,30 @@ import { createClient } from '@supabase/supabase-js'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import { DollarSign, Leaf, AlertTriangle, TrendingDown, Server, Activity } from 'lucide-react'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
-
 const API_URL = process.env.NEXT_PUBLIC_API_URL
 
+// Define types for our data
+type Opportunity = {
+  id: string
+  workload_id: string
+  savings_usd: number
+  carbon_reduction_gco2e: number
+  confidence_score: number
+  risk_level: string
+  explanation: string
+  opportunity_type: string
+  workloads: {
+    name: string
+    kind: string
+    namespaces: {
+      name: string
+    }
+  }
+}
+
 export default function Dashboard() {
-  const [opportunities, setOpportunities] = useState<any[]>([])
+  const [supabase, setSupabase] = useState<any>(null)
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([])
   const [stats, setStats] = useState({
     totalSavings: 0,
     carbonReduction: 0,
@@ -25,10 +40,23 @@ export default function Dashboard() {
   const [analyzing, setAnalyzing] = useState(false)
 
   useEffect(() => {
-    fetchData()
+    // Initialize Supabase client when component mounts
+    const client = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    )
+    setSupabase(client)
   }, [])
 
+  useEffect(() => {
+    if (supabase) {
+      fetchData()
+    }
+  }, [supabase])
+
   async function fetchData() {
+    if (!supabase) return
+    
     setLoading(true)
     
     // Fetch opportunities
@@ -50,14 +78,14 @@ export default function Dashboard() {
       setOpportunities(opps || [])
       
       // Calculate stats
-      const totalSavings = opps?.reduce((sum, opp) => sum + opp.savings_usd, 0) || 0
-      const carbonReduction = opps?.reduce((sum, opp) => sum + opp.carbon_reduction_gco2e, 0) || 0
+      const totalSavings = opps?.reduce((sum: number, opp: Opportunity) => sum + opp.savings_usd, 0) || 0
+      const carbonReduction = opps?.reduce((sum: number, opp: Opportunity) => sum + opp.carbon_reduction_gco2e, 0) || 0
       
       setStats({
         totalSavings,
         carbonReduction,
         opportunityCount: opps?.length || 0,
-        workloadCount: new Set(opps?.map(o => o.workload_id)).size || 0
+        workloadCount: new Set(opps?.map((o: Opportunity) => o.workload_id)).size || 0
       })
     }
     
@@ -93,6 +121,13 @@ export default function Dashboard() {
   }
 
   const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444']
+
+  // Add a loading state while Supabase is initializing
+  if (!supabase) {
+    return <div className="min-h-screen bg-gray-50 p-8 flex items-center justify-center">
+      <p className="text-gray-500">Loading...</p>
+    </div>
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
@@ -240,7 +275,7 @@ function StatCard({ title, value, icon, color }: any) {
   )
 }
 
-function OpportunityCard({ opportunity }: any) {
+function OpportunityCard({ opportunity }: { opportunity: Opportunity }) {
   const getRiskColor = (risk: string) => {
     switch (risk) {
       case 'low': return 'text-green-600 bg-green-50 border-green-200'

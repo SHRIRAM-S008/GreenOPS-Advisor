@@ -90,6 +90,24 @@ npm run dev
 - `GET /opportunities` - Retrieve identified optimization opportunities
 - `GET /recommendations/{workload_id}` - Get AI-powered recommendations for specific workloads
 
+## Deployment
+
+### GitHub Deployment
+
+The code is hosted on GitHub at: https://github.com/SHRIRAM-S008/GreenOPS-Advisor
+
+### Vercel Deployment
+
+The frontend is deployed on Vercel at: https://frontend-8leoc6c3w-shriram-s008s-projects.vercel.app
+
+## GitHub App Integration
+
+To set up the GitHub App webhook integration:
+
+1. Create a GitHub App with the webhook URL pointing to your backend API
+2. Update the webhook secret in `backend/.env`
+3. Add the private key file to `backend/`
+
 ## License
 
 MIT

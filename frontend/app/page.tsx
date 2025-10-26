@@ -38,14 +38,31 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [collecting, setCollecting] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    // Check if environment variables are set
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    
+    if (!supabaseUrl) {
+      setError('Missing NEXT_PUBLIC_SUPABASE_URL environment variable')
+      return
+    }
+    
+    if (!supabaseKey) {
+      setError('Missing NEXT_PUBLIC_SUPABASE_ANON_KEY environment variable')
+      return
+    }
+    
     // Initialize Supabase client when component mounts
-    const client = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    )
-    setSupabase(client)
+    try {
+      const client = createClient(supabaseUrl, supabaseKey)
+      setSupabase(client)
+    } catch (err) {
+      setError('Failed to initialize Supabase client: ' + (err as Error).message)
+      console.error('Supabase client initialization error:', err)
+    }
   }, [])
 
   useEffect(() => {
@@ -121,6 +138,29 @@ export default function Dashboard() {
   }
 
   const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444']
+
+  // Show error message if there's an initialization error
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-8 flex items-center justify-center">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-2xl">
+          <h2 className="text-2xl font-bold text-red-800 mb-4">Configuration Error</h2>
+          <p className="text-red-700 mb-4">{error}</p>
+          <p className="text-gray-600">
+            Please check your environment variables in <code className="bg-gray-100 px-2 py-1 rounded">.env.local</code>
+          </p>
+          <div className="mt-4">
+            <h3 className="font-semibold text-gray-800">Required variables:</h3>
+            <ul className="list-disc pl-5 mt-2 text-gray-700">
+              <li>NEXT_PUBLIC_SUPABASE_URL</li>
+              <li>NEXT_PUBLIC_SUPABASE_ANON_KEY</li>
+              <li>NEXT_PUBLIC_API_URL</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   // Add a loading state while Supabase is initializing
   if (!supabase) {

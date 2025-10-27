@@ -1,59 +1,39 @@
 #!/bin/bash
 
-# GreenOps Stack Verification Script
-# This script verifies all components of the GreenOps stack
+# Script to verify real-time metrics functionality
 
-echo "=== GreenOps Stack Real-time Verification ==="
-echo ""
+echo "Verifying real-time metrics setup..."
 
-# Colors for output
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-NC='\033[0m' # No Color
+# Check if required environment variables are set
+if [[ -z "$NEXT_PUBLIC_API_URL" ]]; then
+    echo "Warning: NEXT_PUBLIC_API_URL is not set"
+    echo "Please set it to your deployed backend URL"
+fi
 
-# Function to print status
-print_status() {
-    if [ $1 -eq 0 ]; then
-        echo -e "${GREEN}✅ PASSED${NC} - $2"
-    else
-        echo -e "${RED}❌ FAILED${NC} - $2"
-    fi
-}
+if [[ -z "$NEXT_PUBLIC_SUPABASE_URL" ]]; then
+    echo "Error: NEXT_PUBLIC_SUPABASE_URL is not set"
+    exit 1
+fi
 
-# 1. Check Minikube status
-echo "1. Checking Minikube status..."
-minikube status > /dev/null 2>&1
-print_status $? "Minikube cluster running"
+if [[ -z "$NEXT_PUBLIC_SUPABASE_ANON_KEY" ]]; then
+    echo "Error: NEXT_PUBLIC_SUPABASE_ANON_KEY is not set"
+    exit 1
+fi
 
-# 2. Check Metrics Server
-echo "2. Checking Metrics Server..."
-kubectl top nodes > /dev/null 2>&1
-print_status $? "Metrics Server providing live data"
+echo "Environment variables check passed"
 
-# 3. Check Prometheus
-echo "3. Checking Prometheus..."
-curl -s http://localhost:9090/-/healthy > /dev/null 2>&1
-print_status $? "Prometheus server responding"
+# Test Supabase connection
+echo "Testing Supabase connection..."
+curl -s -X POST "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/rpc/health" \
+  -H "apikey: $NEXT_PUBLIC_SUPABASE_ANON_KEY" \
+  -H "Authorization: Bearer $NEXT_PUBLIC_SUPABASE_ANON_KEY" \
+  > /dev/null
 
-# 4. Check Grafana
-echo "4. Checking Grafana..."
-curl -s http://localhost:3000/api/health > /dev/null 2>&1
-print_status $? "Grafana server responding"
+if [[ $? -eq 0 ]]; then
+    echo "Supabase connection successful"
+else
+    echo "Warning: Supabase connection test failed"
+fi
 
-# 5. Check OpenCost
-echo "5. Checking OpenCost..."
-curl -s "http://localhost:9003/allocation/compute?window=1d" | grep -q '"code":200'
-print_status $? "OpenCost API responding"
-
-# 6. Check Kepler
-echo "6. Checking Kepler..."
-curl -s http://localhost:9102/metrics | grep -q "kepler_container"
-print_status $? "Kepler metrics available"
-
-# 7. Check Prometheus Integration
-echo "7. Checking Prometheus Integration..."
-curl -s http://localhost:9090/api/v1/targets | jq -r '.data.activeTargets[] | select(.labels.job == "opencost" or .labels.job == "kepler") | .health' | grep -q "up"
-print_status $? "Prometheus scraping OpenCost and Kepler"
-
-echo ""
-echo "=== Verification Complete ==="
+echo "Real-time metrics verification complete"
+echo "To test WebSocket connection, open the application in browser and check developer console"

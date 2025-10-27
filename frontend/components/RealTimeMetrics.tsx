@@ -16,13 +16,18 @@ export default function RealTimeMetrics() {
 
   useEffect(() => {
     // Connect to WebSocket endpoint
-    const wsUrl = `${process.env.NEXT_PUBLIC_API_URL?.replace('http', 'ws')}/ws/metrics`
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+    const wsUrl = `${apiBaseUrl.replace('http', 'ws')}/ws/metrics`
+    console.log('Connecting to WebSocket:', wsUrl)
+    
     const ws = new WebSocket(wsUrl)
     
     ws.onopen = () => {
       console.log('Connected to real-time metrics')
       setIsConnected(true)
       setWebsocket(ws)
+      // Request initial metrics collection
+      ws.send('collect')
     }
     
     ws.onmessage = (event) => {

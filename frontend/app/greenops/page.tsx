@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Leaf, Cpu, Database, Zap, TrendingDown, RefreshCw } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import RefreshButton from '@/components/RefreshButton'
+import RealTimeMetrics from '@/components/RealTimeMetrics'
 
 // Define types for our metrics data
 type CostMetric = {
@@ -268,6 +269,11 @@ export default function GreenOpsDashboard() {
               <RefreshButton onRefresh={fetchData} />
             </div>
           </div>
+        </div>
+
+        {/* Real-time Metrics Component */}
+        <div className="mb-8">
+          <RealTimeMetrics />
         </div>
 
         {/* Stats Cards */}

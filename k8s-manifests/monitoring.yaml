@@ -1,0 +1,136 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+# Prometheus ServiceMonitor for GreenOps Advisor
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: greenops-backend
+  namespace: monitoring
+  labels:
+    app: greenops-backend
+spec:
+  selector:
+    matchLabels:
+      app: greenops-backend
+  namespaceSelector:
+    matchNames:
+    - greenops
+  endpoints:
+  - port: http
+    interval: 30s
+    path: /metrics
+---
+# Grafana Dashboard ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: greenops-grafana-dashboard
+  namespace: monitoring
+data:
+  greenops-dashboard.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "GreenOps Advisor",
+        "timezone": "browser",
+        "schemaVersion": 16,
+        "version": 0,
+        "refresh": "25s",
+        "panels": [
+          {
+            "id": 1,
+            "type": "graph",
+            "title": "CPU Usage",
+            "datasource": "Prometheus",
+            "targets": [
+              {
+                "expr": "rate(container_cpu_usage_seconds_total{namespace=\"greenops\"}[5m])",
+                "legendFormat": "{{pod}}"
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "type": "graph",
+            "title": "Memory Usage",
+            "datasource": "Prometheus",
+            "targets": [
+              {
+                "expr": "container_memory_usage_bytes{namespace=\"greenops\"}",
+                "legendFormat": "{{pod}}"
+              }
+            ]
+          },
+          {
+            "id": 3,
+            "type": "graph",
+            "title": "Network I/O",
+            "datasource": "Prometheus",
+            "targets": [
+              {
+                "expr": "rate(container_network_receive_bytes_total{namespace=\"greenops\"}[5m])",
+                "legendFormat": "{{pod}} - RX"
+              },
+              {
+                "expr": "rate(container_network_transmit_bytes_total{namespace=\"greenops\"}[5m])",
+                "legendFormat": "{{pod}} - TX"
+              }
+            ]
+          }
+        ]
+      }
+    }
+---
+# Alerting rules
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: greenops-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - name: greenops.rules
+    rules:
+    - alert: HighCPUUsage
+      expr: rate(container_cpu_usage_seconds_total{namespace="greenops"}[5m]) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High CPU usage detected"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is using more than 80% CPU"
+    - alert: HighMemoryUsage
+      expr: container_memory_usage_bytes{namespace="greenops"} / container_spec_memory_limit_bytes{namespace="greenops"} > 0.8
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High memory usage detected"
+        description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is using more than 80% memory"
+    - alert: HighErrorRate
+      expr: rate(http_requests_total{namespace="greenops", status=~"5.."}[5m]) / rate(http_requests_total{namespace="greenops"}[5m]) > 0.05
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High error rate detected"
+        description: "API is returning more than 5% errors"
+    - alert: HighLatency
+      expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{namespace="greenops"}[5m])) > 1
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High latency detected"
+        description: "API 95th percentile latency is above 1 second"
+    - alert: LowAvailability
+      expr: up{namespace="greenops"} == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Service is down"
+        description: "GreenOps Advisor service is not responding"

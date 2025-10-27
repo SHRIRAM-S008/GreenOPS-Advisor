@@ -3,7 +3,6 @@ import json
 import os
 from typing import Dict, Any
 import yaml
-from deepdiff import DeepDiff
 import time
 import logging
 
@@ -196,14 +195,47 @@ def generate_strategic_merge_patch(original_yaml_text: str, suggested_resources:
         # Fallback to original template approach
         return "# Error generating patch. Please update container names manually.\n" + original_yaml_text
 
-def generate_yaml_patch(workload_data: Dict[str, Any], recommendation: Dict[str, Any]) -> str:
+def generate_yaml_patch(workload_data: Dict[str, Any], recommendation: Dict[str, Any], workload_manifest: Dict[str, Any] | None = None) -> str:
     """
     Generate Kubernetes YAML patch based on recommendation.
     This is the main function that will be called by the application.
+    
+    Args:
+        workload_data: Dictionary containing workload information
+        recommendation: Dictionary containing AI recommendations
+        workload_manifest: Optional Kubernetes workload manifest for strategic merge patch
     """
     
-    # For now, we'll return the complete manifest approach since we don't have the original YAML
-    # In a real implementation, this would use the strategic merge patch approach
+    # If we have the original workload manifest, use strategic merge patch approach
+    if workload_manifest:
+        try:
+            # Convert recommendation to suggested resources format
+            # For now, we'll assume a single container named after the workload
+            # In a real implementation, this would need to be more sophisticated
+            workload_name = workload_data['name']
+            container_name = workload_data.get('container_name', 'main')
+            
+            # Convert recommended resources to Kubernetes format
+            recommended_cpu_millis = int(recommendation['recommended_cpu'] * 1000)
+            recommended_memory_mib = int(recommendation['recommended_memory'] * 1024)
+            
+            suggested_resources = {
+                (workload_name, container_name): {
+                    "cpu": f"{recommended_cpu_millis}m",
+                    "memory": f"{recommended_memory_mib}Mi"
+                }
+            }
+            
+            # Convert manifest to YAML string for patch generation
+            import yaml
+            manifest_yaml = yaml.safe_dump(workload_manifest, default_flow_style=False)
+            
+            # Generate strategic merge patch
+            return generate_strategic_merge_patch(manifest_yaml, suggested_resources)
+        except Exception as e:
+            logger.warning(f"Failed to generate strategic merge patch: {e}. Falling back to complete manifest.")
+    
+    # Fallback to complete manifest approach
     return generate_yaml_patch_for_workload(workload_data, recommendation)
 
 def generate_recommendation(workload_data: Dict[str, Any]) -> Dict[str, Any]:

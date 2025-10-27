@@ -170,6 +170,47 @@ COST_PER_CPU_HOUR = 0.02   # USD per cpu core-hour (from collect_metrics functio
 COST_PER_GB_HOUR = 0.005    # USD per GB-hour (from collect_metrics function)
 HOURS_PER_MONTH = 24 * 30
 
+# ========== UTILITY FUNCTIONS FOR COST AND CARBON CALCULATIONS ==========
+
+def compute_cost_delta(cpu_delta_cores: float, mem_delta_gb: float) -> float:
+    """
+    Compute monthly cost delta from CPU and memory resource changes
+    
+    Args:
+        cpu_delta_cores: Change in CPU cores requested
+        mem_delta_gb: Change in memory GB requested
+        
+    Returns:
+        Monthly cost delta in USD
+    """
+    cpu_monthly = cpu_delta_cores * HOURS_PER_MONTH * COST_PER_CPU_HOUR
+    mem_monthly = mem_delta_gb * HOURS_PER_MONTH * COST_PER_GB_HOUR
+    return cpu_monthly + mem_monthly
+
+def compute_carbon_delta(cpu_delta_cores: float, mem_delta_gb: float) -> float:
+    """
+    Compute monthly carbon delta from CPU and memory resource changes
+    
+    Args:
+        cpu_delta_cores: Change in CPU cores requested
+        mem_delta_gb: Change in memory GB requested
+        
+    Returns:
+        Monthly carbon delta in gCO2e
+    """
+    # Energy consumption approximation (50W per CPU core)
+    # This should be aligned with Kepler metrics when available
+    energy_kwh = (abs(cpu_delta_cores) * 50/1000.0) * HOURS_PER_MONTH
+    
+    # Carbon intensity (gCO2e per kWh) - should be configurable
+    carbon_intensity = float(os.getenv("CARBON_INTENSITY_G_PER_KWH", "475"))
+    
+    # Convert to gCO2e
+    carbon_g = energy_kwh * carbon_intensity
+    
+    # Return negative value for reductions (savings)
+    return carbon_g if cpu_delta_cores >= 0 else -carbon_g
+
 # ========== ADDITIONAL UTILITY FUNCTIONS FOR GITHUB WEBHOOK ==========
 
 def parse_resources_from_manifest(yaml_text: str) -> List[Dict[str, Any]]:
@@ -793,8 +834,51 @@ async def get_workload_recommendations(workload_id: str):
         # Generate AI recommendation
         recommendation = generate_recommendation(workload_data)
         
+        # Get workload manifest for strategic merge patch generation
+        workload_manifest = None
+        try:
+            # Get detailed workload information from Kubernetes
+            k8s_workload = None
+            if workload.data[0]["kind"] == "Deployment":
+                k8s_workload = k8s_apps.read_namespaced_deployment(
+                    workload.data[0]["name"], 
+                    workload.data[0]["namespaces"]["name"]
+                )
+            elif workload.data[0]["kind"] == "StatefulSet":
+                k8s_workload = k8s_apps.read_namespaced_stateful_set(
+                    workload.data[0]["name"], 
+                    workload.data[0]["namespaces"]["name"]
+                )
+            elif workload.data[0]["kind"] == "DaemonSet":
+                k8s_workload = k8s_apps.read_namespaced_daemon_set(
+                    workload.data[0]["name"], 
+                    workload.data[0]["namespaces"]["name"]
+                )
+            elif workload.data[0]["kind"] == "Job":
+                k8s_workload = k8s_batch.read_namespaced_job(
+                    workload.data[0]["name"], 
+                    workload.data[0]["namespaces"]["name"]
+                )
+            elif workload.data[0]["kind"] == "CronJob":
+                k8s_workload = k8s_batch.read_namespaced_cron_job(
+                    workload.data[0]["name"], 
+                    workload.data[0]["namespaces"]["name"]
+                )
+            
+            if k8s_workload:
+                workload_manifest = k8s_workload.to_dict()
+                
+                # Add container name to workload data for patch generation
+                if workload_manifest and "spec" in workload_manifest:
+                    template_spec = workload_manifest["spec"].get("template", {}).get("spec", {})
+                    containers = template_spec.get("containers", [])
+                    if containers:
+                        workload_data["container_name"] = containers[0].get("name", "main")
+        except Exception as e:
+            logger.warning(f"Could not retrieve workload manifest: {e}")
+        
         # Generate YAML patch
-        yaml_patch = generate_yaml_patch(workload_data, recommendation)
+        yaml_patch = generate_yaml_patch(workload_data, recommendation, workload_manifest)
         
         return {
             "workload": workload_data,

@@ -1,0 +1,46 @@
+name: Automated Backups
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch: # Allows manual triggering
+
+jobs:
+  backup-kubernetes:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+    
+    - name: Set up kubeconfig
+      run: |
+        mkdir -p ~/.kube
+        echo "${{ secrets.KUBECONFIG_DATA }}" | base64 -d > ~/.kube/config
+    
+    - name: Create backup
+      run: |
+        chmod +x scripts/backup.sh
+        ./scripts/backup.sh
+    
+    - name: Upload backup artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: greenops-backup-${{ github.run_number }}
+        path: backups/
+        retention-days: 30
+
+  backup-database:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Backup Supabase database
+      run: |
+        # This would typically use Supabase's backup APIs
+        echo "Backing up Supabase database..."
+        # Implementation depends on specific backup method

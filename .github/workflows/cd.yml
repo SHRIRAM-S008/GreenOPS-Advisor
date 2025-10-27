@@ -1,0 +1,46 @@
+name: CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy-to-kubernetes:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+    
+    - name: Set up kubeconfig
+      run: |
+        mkdir -p ~/.kube
+        echo "${{ secrets.KUBECONFIG_DATA }}" | base64 -d > ~/.kube/config
+    
+    - name: Deploy to Kubernetes
+      run: |
+        kubectl apply -f k8s-manifests/
+    
+    - name: Verify deployment
+      run: |
+        kubectl rollout status deployment/greenops-backend -n greenops
+        kubectl rollout status deployment/greenops-frontend -n greenops
+
+  deploy-to-vercel:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Deploy frontend to Vercel
+      uses: amondnet/vercel-action@v25
+      with:
+        vercel-token: ${{ secrets.VERCEL_TOKEN }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+        vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+        scope: ${{ github.actor }}

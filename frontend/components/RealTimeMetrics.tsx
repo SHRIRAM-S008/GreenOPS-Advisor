@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
 interface MetricsData {
@@ -12,20 +12,45 @@ interface MetricsData {
 export default function RealTimeMetrics() {
   const [metrics, setMetrics] = useState<MetricsData[]>([])
   const [isConnected, setIsConnected] = useState(false)
-  const [websocket, setWebsocket] = useState<WebSocket | null>(null)
+  const websocketRef = useRef<WebSocket | null>(null)
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  useEffect(() => {
+  // Function to establish WebSocket connection
+  const connectWebSocket = () => {
+    // Clear any existing reconnection timeout
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current)
+      reconnectTimeoutRef.current = null
+    }
+    
     // Connect to WebSocket endpoint
     const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-    const wsUrl = `${apiBaseUrl.replace('http', 'ws')}/ws/metrics`
+    
+    // More robust WebSocket URL construction
+    let wsUrl: string;
+    if (apiBaseUrl.startsWith('http://')) {
+      wsUrl = `ws://${apiBaseUrl.substring(7)}/ws/metrics`
+    } else if (apiBaseUrl.startsWith('https://')) {
+      wsUrl = `wss://${apiBaseUrl.substring(8)}/ws/metrics`
+    } else {
+      // Assume it's a hostname:port format
+      wsUrl = `ws://${apiBaseUrl}/ws/metrics`
+    }
+    
     console.log('Connecting to WebSocket:', wsUrl)
+    console.log('API Base URL:', apiBaseUrl)
+    
+    // Validate environment variable
+    if (!process.env.NEXT_PUBLIC_API_URL) {
+      console.warn('NEXT_PUBLIC_API_URL is not set, using default value')
+    }
     
     const ws = new WebSocket(wsUrl)
+    websocketRef.current = ws
     
     ws.onopen = () => {
       console.log('Connected to real-time metrics')
       setIsConnected(true)
-      setWebsocket(ws)
       // Request initial metrics collection
       ws.send('collect')
     }
@@ -49,18 +74,39 @@ export default function RealTimeMetrics() {
     ws.onclose = () => {
       console.log('Disconnected from real-time metrics')
       setIsConnected(false)
-      setWebsocket(null)
+      websocketRef.current = null
+      
+      // Attempt to reconnect after 5 seconds
+      reconnectTimeoutRef.current = setTimeout(() => {
+        console.log('Attempting to reconnect...')
+        connectWebSocket()
+      }, 5000)
     }
     
     ws.onerror = (error) => {
       console.error('WebSocket error:', error)
+      console.error('WebSocket error details:', {
+        url: wsUrl,
+        readyState: ws.readyState,
+        protocol: ws.protocol,
+        extensions: ws.extensions
+      })
       setIsConnected(false)
     }
+  }
+
+  useEffect(() => {
+    // Initial connection
+    connectWebSocket()
     
     // Cleanup function
     return () => {
-      if (ws) {
-        ws.close()
+      console.log('Cleaning up WebSocket connection')
+      if (websocketRef.current) {
+        websocketRef.current.close()
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current)
       }
     }
   }, [])

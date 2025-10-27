@@ -216,6 +216,18 @@ To set up the GitHub App webhook integration:
 2. Update the webhook secret in `backend/.env`
 3. Add the private key file to `backend/`
 
+## Documentation
+
+For detailed information about the GreenOps Advisor, please refer to the following documentation:
+
+- [Architecture](docs/architecture.md) - System architecture and components
+- [Deployment Guide](docs/deployment-guide.md) - Instructions for deploying in production
+- [User Guide](docs/user-guide.md) - How to use the application
+- [API Documentation](docs/api-documentation.md) - REST API reference
+- [Operations Runbook](docs/operations-runbook.md) - Operational procedures
+- [Security Runbook](docs/security-runbook.md) - Security procedures and best practices
+- [Backup and Disaster Recovery](docs/backup-disaster-recovery.md) - Backup strategies and recovery procedures
+
 ## License
 
 MIT

@@ -1,0 +1,69 @@
+---
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: greenops-daily-backup
+  namespace: velero
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  template:
+    metadata:
+      labels:
+        app: greenops-advisor
+    spec:
+      includedNamespaces:
+      - greenops
+      includedResources:
+      - deployments
+      - services
+      - configmaps
+      - secrets
+      - persistentvolumeclaims
+      - serviceaccounts
+      - roles
+      - rolebindings
+      - networkpolicies
+      ttl: "168h"  # 7 days
+---
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: greenops-weekly-backup
+  namespace: velero
+spec:
+  schedule: "0 3 * * 0"  # Weekly on Sunday at 3 AM
+  template:
+    metadata:
+      labels:
+        app: greenops-advisor
+    spec:
+      includedNamespaces:
+      - greenops
+      includedResources:
+      - "*"
+      ttl: "720h"  # 30 days
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backup-script
+  namespace: greenops
+data:
+  backup.sh: |
+    #!/bin/bash
+    # Script to perform manual backups
+    
+    # Backup Supabase database
+    echo "Backing up Supabase database..."
+    # This would typically use Supabase's built-in backup features
+    
+    # Backup Kubernetes resources
+    echo "Backing up Kubernetes resources..."
+    kubectl get all -n greenops -o yaml > /backups/greenops-resources-$(date +%Y%m%d-%H%M%S).yaml
+    
+    # Backup configuration files
+    echo "Backing up configuration files..."
+    kubectl get configmaps -n greenops -o yaml > /backups/greenops-configmaps-$(date +%Y%m%d-%H%M%S).yaml
+    kubectl get secrets -n greenops -o yaml > /backups/greenops-secrets-$(date +%Y%m%d-%H%M%S).yaml
+    
+    echo "Backup completed successfully!"

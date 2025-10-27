@@ -1,0 +1,73 @@
+# Pod Security Standards (PSS) - Restricted policy
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: greenops
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+---
+# Resource quotas to prevent resource exhaustion
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: greenops-resource-quota
+  namespace: greenops
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 2Gi
+    limits.cpu: "4"
+    limits.memory: 4Gi
+    persistentvolumeclaims: "10"
+    pods: "20"
+---
+# LimitRange to set default resource requests/limits
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: greenops-limit-range
+  namespace: greenops
+spec:
+  limits:
+  - default:
+      cpu: 200m
+      memory: 256Mi
+    defaultRequest:
+      cpu: 100m
+      memory: 128Mi
+    type: Container
+  - max:
+      cpu: "2"
+      memory: 2Gi
+    min:
+      cpu: 50m
+      memory: 64Mi
+    type: Pod
+---
+# PodDisruptionBudget for high availability
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: greenops-backend-pdb
+  namespace: greenops
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: greenops-backend
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: greenops-frontend-pdb
+  namespace: greenops
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: greenops-frontend

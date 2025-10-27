@@ -1,0 +1,114 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: greenops
+  labels:
+    name: greenops
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: greenops-backend-policy
+  namespace: greenops
+spec:
+  podSelector:
+    matchLabels:
+      app: greenops-backend
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow traffic from frontend to backend on port 8000
+  - from:
+    - podSelector:
+        matchLabels:
+          app: greenops-frontend
+    ports:
+    - protocol: TCP
+      port: 8000
+  # Allow traffic from Prometheus for metrics scraping
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  # Allow egress to Supabase
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0  # In production, restrict to Supabase IP ranges
+    ports:
+    - protocol: TCP
+      port: 443
+  # Allow egress to Prometheus
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090
+  # Allow egress to OpenCost
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: opencost
+    ports:
+    - protocol: TCP
+      port: 9003
+  # Allow egress to Kepler
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kepler
+    ports:
+    - protocol: TCP
+      port: 9102
+  # Allow egress to Ollama
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: ollama
+    ports:
+    - protocol: TCP
+      port: 11434
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: greenops-frontend-policy
+  namespace: greenops
+spec:
+  podSelector:
+    matchLabels:
+      app: greenops-frontend
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow traffic from Ingress controller
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 3000
+  egress:
+  # Allow egress to backend
+  - to:
+    - podSelector:
+        matchLabels:
+          app: greenops-backend
+    ports:
+    - protocol: TCP
+      port: 8000
+  # Allow egress to Supabase for direct client access
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0  # In production, restrict to Supabase IP ranges
+    ports:
+    - protocol: TCP
+      port: 443

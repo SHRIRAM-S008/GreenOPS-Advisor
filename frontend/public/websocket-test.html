@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Test</title>
+</head>
+<body>
+    <h1>WebSocket Test</h1>
+    <div id="status">Connecting...</div>
+    <div id="messages"></div>
+
+    <script>
+        const statusDiv = document.getElementById('status');
+        const messagesDiv = document.getElementById('messages');
+        
+        // Connect to WebSocket endpoint
+        const wsUrl = 'ws://localhost:8000/ws/metrics';
+        console.log('Connecting to WebSocket:', wsUrl);
+        
+        const ws = new WebSocket(wsUrl);
+        
+        ws.onopen = () => {
+            statusDiv.innerHTML = 'Connected';
+            console.log('Connected to real-time metrics');
+            // Request initial metrics collection
+            ws.send('collect');
+        };
+        
+        ws.onmessage = (event) => {
+            console.log('Received message:', event.data);
+            messagesDiv.innerHTML += '<p>' + event.data + '</p>';
+        };
+        
+        ws.onclose = () => {
+            statusDiv.innerHTML = 'Disconnected';
+            console.log('Disconnected from real-time metrics');
+        };
+        
+        ws.onerror = (error) => {
+            statusDiv.innerHTML = 'Error';
+            console.error('WebSocket error:', error);
+        };
+    </script>
+</body>
+</html>

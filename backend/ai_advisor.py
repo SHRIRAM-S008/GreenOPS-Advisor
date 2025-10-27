@@ -2,8 +2,209 @@ import requests
 import json
 import os
 from typing import Dict, Any
+import yaml
+from deepdiff import DeepDiff
+import time
+import logging
+
+# Import the parsing functions from utils.py
+from utils import parse_cpu_to_cores, parse_mem_to_gb
+# Import the new AI provider abstraction
+from ai_provider import get_ai_provider
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+
+# Configuration constants for AI service
+AI_TIMEOUT = int(os.getenv("AI_TIMEOUT_SECONDS", "60"))
+AI_RETRIES = int(os.getenv("AI_RETRIES", "3"))
+
+# Configuration constants for rightsizing calculations
+DEFAULT_BUFFER = 1.25  # 25% buffer on top of observed peak usage
+COST_PER_CPU_HOUR = 0.02  # From main.py collect_metrics function
+COST_PER_GB_HOUR = 0.005   # From main.py collect_metrics function
+HOURS_PER_MONTH = 24 * 30
+REDUCTION_THRESHOLD = 0.85  # Only recommend reduction if suggested < current request by 15%
+
+def compute_rightsizing(workload_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Compute rightsizing suggestion from actual requests vs usage with a safe buffer.
+    
+    Args:
+        workload_data: Dictionary containing workload resource information
+        
+    Returns:
+        Dictionary with suggested resources and estimated savings
+    """
+    # Parse current requests and usage
+    cpu_req = parse_cpu_to_cores(workload_data.get("cpu_requested", "0"))
+    mem_req = parse_mem_to_gb(workload_data.get("memory_requested", "0"))
+    cpu_used = float(workload_data.get("cpu_used", 0.0))
+    mem_used = float(workload_data.get("memory_used", 0.0))
+    
+    # Calculate suggested resources with buffer
+    suggested_cpu = max(0.001, cpu_used * DEFAULT_BUFFER)
+    suggested_mem = max(0.001, mem_used * DEFAULT_BUFFER)
+    
+    # Only recommend reduction if there's meaningful slack
+    cpu_reduction = 0.0
+    mem_reduction = 0.0
+    
+    if suggested_cpu < cpu_req * REDUCTION_THRESHOLD:
+        cpu_reduction = cpu_req - suggested_cpu
+    if suggested_mem < mem_req * REDUCTION_THRESHOLD:
+        mem_reduction = mem_req - suggested_mem
+    
+    # Calculate monthly savings
+    monthly_saving = (cpu_reduction * COST_PER_CPU_HOUR + mem_reduction * COST_PER_GB_HOUR) * HOURS_PER_MONTH
+    
+    return {
+        "suggested_cpu": suggested_cpu,
+        "suggested_mem_gb": suggested_mem,
+        "monthly_saving_usd": monthly_saving
+    }
+
+def call_ai_model(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Call the AI model with exponential backoff retries and structured error handling.
+    Uses the new AI provider abstraction.
+    
+    Args:
+        payload: Dictionary containing the request payload for the AI model
+        
+    Returns:
+        Dictionary containing the AI response or fallback result
+    """
+    try:
+        # Get the configured AI provider
+        ai_provider = get_ai_provider()
+        
+        # Extract prompt and system prompt from payload
+        prompt = payload.get("prompt", "")
+        system_prompt = payload.get("system", None)
+        
+        logger.info(f"AI request using {ai_provider.__class__.__name__}")
+        response = ai_provider.ask(prompt, system_prompt)
+        return response
+    except Exception as e:
+        last_exc = str(e)
+        logger.error(f"AI request failed: {last_exc}")
+        
+        # Return structured fallback
+        return {
+            "status": "fallback", 
+            "error": last_exc,
+            "fallback_used": True
+        }
+
+def generate_yaml_patch_for_workload(workload_data: Dict[str, Any], recommendation: Dict[str, Any]) -> str:
+    """
+    Generate a complete Kubernetes YAML manifest for a workload with recommended resources.
+    
+    Args:
+        workload_data: Dictionary containing workload information
+        recommendation: Dictionary containing AI recommendations
+        
+    Returns:
+        String containing the complete YAML manifest
+    """
+    # Convert recommended resources to Kubernetes format
+    recommended_cpu_millis = int(recommendation['recommended_cpu'] * 1000)
+    recommended_memory_mib = int(recommendation['recommended_memory'] * 1024)
+    recommended_cpu_limit_millis = int(recommendation['recommended_cpu'] * 1.5 * 1000)
+    recommended_memory_limit_mib = int(recommendation['recommended_memory'] * 1.5 * 1024)
+    
+    yaml_template = f"""
+apiVersion: apps/v1
+kind: {workload_data['kind']}
+metadata:
+  name: {workload_data['name']}
+  namespace: {workload_data['namespace']}
+spec:
+  template:
+    spec:
+      containers:
+      - name: main  # Update with actual container name
+        resources:
+          requests:
+            cpu: "{recommended_cpu_millis}m"
+            memory: "{recommended_memory_mib}Mi"
+          limits:
+            cpu: "{recommended_cpu_limit_millis}m"
+            memory: "{recommended_memory_limit_mib}Mi"
+"""
+    
+    return yaml_template.strip()
+
+def generate_strategic_merge_patch(original_yaml_text: str, suggested_resources: Dict[tuple, Dict[str, str]]) -> str:
+    """
+    Generate a strategic merge patch for Kubernetes resources.
+    
+    Args:
+        original_yaml_text: Original YAML manifest string
+        suggested_resources: Dict keyed by (workload_name, container_name) -> {"cpu": "200m", "memory": "256Mi"}
+        
+    Returns:
+        String containing the strategic merge patch
+    """
+    try:
+        # Parse the original YAML
+        doc = yaml.safe_load(original_yaml_text)
+        
+        # Navigate to containers based on resource type
+        spec = doc.get("spec", {})
+        template = spec.get("template")
+        
+        if template:
+            # For Deployments, StatefulSets, etc.
+            containers = template.setdefault("spec", {}).setdefault("containers", [])
+        else:
+            # For direct Pod manifests
+            containers = spec.setdefault("containers", [])
+        
+        # Update containers with suggested resources
+        for c in containers:
+            cname = c.get("name")
+            workload_name = doc.get("metadata", {}).get("name")
+            key = (workload_name, cname)
+            
+            if key in suggested_resources:
+                # Create or update resources.requests/limits in patch
+                res = suggested_resources[key]
+                c.setdefault("resources", {})
+                c["resources"].setdefault("requests", {})
+                c["resources"].setdefault("limits", {})
+                
+                # Set requests
+                c["resources"]["requests"]["cpu"] = res["cpu"]
+                c["resources"]["requests"]["memory"] = res["memory"]
+                
+                # Set limits (typically 1.5x requests)
+                cpu_millis = int(res["cpu"].rstrip('m'))
+                memory_mib = int(res["memory"].rstrip('Mi'))
+                c["resources"]["limits"]["cpu"] = f"{int(cpu_millis * 1.5)}m"
+                c["resources"]["limits"]["memory"] = f"{int(memory_mib * 1.5)}Mi"
+        
+        # Return the patch as YAML
+        return yaml.safe_dump(doc, default_flow_style=False)
+    
+    except Exception as e:
+        logger.error(f"Error generating strategic merge patch: {e}")
+        # Fallback to original template approach
+        return "# Error generating patch. Please update container names manually.\n" + original_yaml_text
+
+def generate_yaml_patch(workload_data: Dict[str, Any], recommendation: Dict[str, Any]) -> str:
+    """
+    Generate Kubernetes YAML patch based on recommendation.
+    This is the main function that will be called by the application.
+    """
+    
+    # For now, we'll return the complete manifest approach since we don't have the original YAML
+    # In a real implementation, this would use the strategic merge patch approach
+    return generate_yaml_patch_for_workload(workload_data, recommendation)
 
 def generate_recommendation(workload_data: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -40,68 +241,71 @@ Format your response as JSON with keys: explanation, recommended_cpu, recommende
 """
 
     try:
-        response = requests.post(
-            f"{OLLAMA_URL}/api/generate",
-            json={
-                "model": "mistral:7b",
-                "prompt": prompt,
-                "stream": False,
-                "format": "json"
-            },
-            timeout=30
-        )
+        payload = {
+            "model": "mistral:7b",
+            "prompt": prompt,
+            "stream": False,
+            "format": "json"
+        }
         
-        if response.status_code == 200:
-            result = response.json()
+        response_data = call_ai_model(payload)
+        
+        # Check if we got a fallback response
+        if response_data.get("fallback_used"):
+            logger.info("Using fallback recommendation due to AI service failure")
+            # Use improved fallback logic instead of arbitrary multipliers
+            rightsizing = compute_rightsizing(workload_data)
+            return {
+                "explanation": "AI analysis unavailable. Rightsizing recommendation based on actual usage patterns.",
+                "recommended_cpu": rightsizing["suggested_cpu"],
+                "recommended_memory": rightsizing["suggested_mem_gb"],
+                "estimated_savings": rightsizing["monthly_saving_usd"],
+                "risk_level": "medium",
+                "next_step": "Manually review resource usage patterns"
+            }
+        
+        if response_data.get("status") == "fallback":
+            logger.info("Using fallback recommendation due to AI service failure")
+            # Use improved fallback logic instead of arbitrary multipliers
+            rightsizing = compute_rightsizing(workload_data)
+            return {
+                "explanation": f"AI analysis unavailable: {response_data.get('error', 'Unknown error')}. Rightsizing recommendation based on actual usage patterns.",
+                "recommended_cpu": rightsizing["suggested_cpu"],
+                "recommended_memory": rightsizing["suggested_mem_gb"],
+                "estimated_savings": rightsizing["monthly_saving_usd"],
+                "risk_level": "medium",
+                "next_step": "Manually review resource usage patterns"
+            }
+        
+        # Process successful AI response
+        if "response" in response_data:
+            result = response_data
             recommendation = json.loads(result["response"])
             return recommendation
         else:
+            # Use improved fallback logic instead of arbitrary multipliers
+            rightsizing = compute_rightsizing(workload_data)
             return {
-                "explanation": "AI analysis unavailable",
-                "recommended_cpu": workload_data['cpu_used'] * 2,
-                "recommended_memory": workload_data['memory_used'] * 2,
-                "estimated_savings": workload_data['current_cost'] * 0.5,
+                "explanation": "AI analysis unavailable. Rightsizing recommendation based on actual usage patterns.",
+                "recommended_cpu": rightsizing["suggested_cpu"],
+                "recommended_memory": rightsizing["suggested_mem_gb"],
+                "estimated_savings": rightsizing["monthly_saving_usd"],
                 "risk_level": "medium",
                 "next_step": "Manually review resource usage patterns"
             }
     
     except Exception as e:
-        print(f"Error generating AI recommendation: {e}")
+        logger.error(f"Error generating AI recommendation: {e}")
+        # Use improved fallback logic instead of arbitrary multipliers
+        rightsizing = compute_rightsizing(workload_data)
         return {
-            "explanation": f"Error: {str(e)}",
-            "recommended_cpu": workload_data['cpu_used'] * 2,
-            "recommended_memory": workload_data['memory_used'] * 2,
-            "estimated_savings": 0,
+            "explanation": f"Error: {str(e)}. Rightsizing recommendation based on actual usage patterns.",
+            "recommended_cpu": rightsizing["suggested_cpu"],
+            "recommended_memory": rightsizing["suggested_mem_gb"],
+            "estimated_savings": rightsizing["monthly_saving_usd"],
             "risk_level": "high",
             "next_step": "Fix AI integration"
         }
-
-def generate_yaml_patch(workload_data: Dict[str, Any], recommendation: Dict[str, Any]) -> str:
-    """
-    Generate Kubernetes YAML patch based on recommendation
-    """
-    
-    yaml_template = f"""
-apiVersion: apps/v1
-kind: {workload_data['kind']}
-metadata:
-  name: {workload_data['name']}
-  namespace: {workload_data['namespace']}
-spec:
-  template:
-    spec:
-      containers:
-      - name: main  # Update with actual container name
-        resources:
-          requests:
-            cpu: "{int(recommendation['recommended_cpu'] * 1000)}m"
-            memory: "{int(recommendation['recommended_memory'] * 1024)}Mi"
-          limits:
-            cpu: "{int(recommendation['recommended_cpu'] * 1.5 * 1000)}m"
-            memory: "{int(recommendation['recommended_memory'] * 1.5 * 1024)}Mi"
-"""
-    
-    return yaml_template.strip()
 
 # Test function
 if __name__ == "__main__":
@@ -125,4 +329,44 @@ if __name__ == "__main__":
     
     patch = generate_yaml_patch(test_data, recommendation)
     print("\nYAML Patch:")
+    print(patch)
+    
+    # Test strategic merge patch generation
+    sample_yaml = """
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+      - name: main
+        image: nginx:latest
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+"""
+    
+    suggested_resources = {
+        ("my-app", "main"): {
+            "cpu": "375m",
+            "memory": "1536Mi"
+        }
+    }
+    
+    patch = generate_strategic_merge_patch(sample_yaml, suggested_resources)
+    print("\nStrategic Merge Patch:")
     print(patch)

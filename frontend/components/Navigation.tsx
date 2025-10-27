@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Leaf, Home, AlertTriangle, Server, BarChart3, Settings, History, GitPullRequest } from 'lucide-react'
+import { Leaf, Home, AlertTriangle, Server, BarChart3, Settings, History, GitPullRequest, Zap } from 'lucide-react'
 
 export default function Navigation() {
   const pathname = usePathname()
@@ -12,6 +12,7 @@ export default function Navigation() {
     { href: '/opportunities', label: 'Opportunities', icon: AlertTriangle },
     { href: '/workloads', label: 'Workloads', icon: Server },
     { href: '/analysis', label: 'Analysis', icon: BarChart3 },
+    { href: '/greenops', label: 'GreenOps', icon: Zap },
     { href: '/history', label: 'History', icon: History },
     { href: '/pr-events', label: 'PR Events', icon: GitPullRequest },
     { href: '/settings', label: 'Settings', icon: Settings },

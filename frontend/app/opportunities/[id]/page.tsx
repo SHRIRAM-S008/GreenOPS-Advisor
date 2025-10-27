@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '@supabase/supabase-js'
-import { ArrowLeft, AlertTriangle, DollarSign, Leaf, Zap, CheckCircle, XCircle } from 'lucide-react'
+import { ArrowLeft, AlertTriangle, DollarSign, Leaf, Zap, CheckCircle, XCircle, Download, GitPullRequest } from 'lucide-react'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -15,6 +15,9 @@ export default function OpportunityDetailPage() {
   const router = useRouter()
   const [opportunity, setOpportunity] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [applyLoading, setApplyLoading] = useState(false)
+  const [applyError, setApplyError] = useState<string | null>(null)
+  const [patchData, setPatchData] = useState<{ patch: string; kubectlCommand: string } | null>(null)
 
   useEffect(() => {
     fetchOpportunity()
@@ -41,16 +44,59 @@ export default function OpportunityDetailPage() {
   async function applyFix() {
     if (!opportunity) return
 
-    const { error } = await supabase
-      .from('opportunities')
-      .update({ status: 'applied' })
-      .eq('id', params.id)
+    setApplyLoading(true)
+    setApplyError(null)
 
-    if (error) {
-      console.error('Error updating opportunity:', error)
-    } else {
-      // Refresh the opportunity data
-      fetchOpportunity()
+    try {
+      // Call the apply-fix API
+      const response = await fetch('/api/apply-fix', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          opportunityId: params.id,
+          createPr: false
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to apply fix')
+      }
+
+      const data = await response.json()
+      setPatchData(data)
+
+      // Update the opportunity status
+      const { error } = await supabase
+        .from('opportunities')
+        .update({ status: 'applied' })
+        .eq('id', params.id)
+
+      if (error) {
+        console.error('Error updating opportunity:', error)
+      } else {
+        // Refresh the opportunity data
+        fetchOpportunity()
+      }
+
+      // Trigger download of the patch file
+      if (data.patch) {
+        const blob = new Blob([data.patch], { type: 'application/yaml' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `optimization-patch-${params.id}.yaml`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      }
+    } catch (error) {
+      console.error('Error applying fix:', error)
+      setApplyError((error as Error).message)
+    } finally {
+      setApplyLoading(false)
     }
   }
 
@@ -189,17 +235,25 @@ export default function OpportunityDetailPage() {
           </div>
         </div>
 
-        {/* Action Buttons */}
+        {/* Apply Fix Section */}
         {opportunity.status === 'pending' && (
-          <div className="bg-white rounded-lg shadow-lg p-6">
+          <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
             <h2 className="text-xl font-bold text-gray-900 mb-4">Apply Recommendation</h2>
+            
+            {applyError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4">
+                <p>Error: {applyError}</p>
+              </div>
+            )}
+            
             <div className="flex flex-col sm:flex-row gap-4">
               <button
                 onClick={applyFix}
-                className="flex-1 bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 flex items-center justify-center gap-2"
+                disabled={applyLoading}
+                className="flex-1 bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                <CheckCircle size={20} />
-                Apply Fix
+                <Download size={20} />
+                {applyLoading ? 'Applying...' : 'Download YAML Patch'}
               </button>
               <button
                 onClick={rejectFix}
@@ -209,10 +263,35 @@ export default function OpportunityDetailPage() {
                 Reject Recommendation
               </button>
             </div>
+            
+            <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+              <h3 className="font-medium text-blue-800 mb-2">How to apply this fix:</h3>
+              <ol className="list-decimal list-inside text-blue-700 space-y-1">
+                <li>Download the YAML patch file above</li>
+                <li>Review the changes in the file</li>
+                <li>Apply to your cluster with: <code className="bg-white px-1 rounded">kubectl apply -f optimization-patch-{params.id}.yaml</code></li>
+              </ol>
+            </div>
+            
             <p className="text-sm text-gray-500 mt-4">
               Note: Applying this fix will modify your Kubernetes workload configuration.
               Make sure you have proper backups before proceeding.
             </p>
+          </div>
+        )}
+        
+        {opportunity.status === 'applied' && patchData && (
+          <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Applied Fix</h2>
+            <div className="p-4 bg-green-50 rounded-lg">
+              <h3 className="font-medium text-green-800 mb-2">Patch successfully downloaded!</h3>
+              <p className="text-green-700">
+                The YAML patch has been downloaded to your computer. You can apply it to your cluster using:
+              </p>
+              <code className="block bg-white p-2 mt-2 rounded text-sm">
+                {patchData.kubectlCommand}
+              </code>
+            </div>
           </div>
         )}
       </div>

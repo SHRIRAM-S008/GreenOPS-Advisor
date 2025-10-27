@@ -1,11 +1,13 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 import { DollarSign, Leaf, AlertTriangle, TrendingDown, Server, Activity } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Opportunity } from '@/types/supabase'
 import RefreshButton from '@/components/RefreshButton'
+import RealTimeMetrics from '@/components/RealTimeMetrics'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL
 
@@ -21,6 +23,20 @@ export default function Dashboard() {
   const [collecting, setCollecting] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  // Add state for apply fix functionality
+  const [applyFixState, setApplyFixState] = useState<Record<string, ApplyFixState>>({})
+  const router = useRouter()
+
+  // Add new state for managing apply fix functionality
+  interface ApplyFixState {
+    loading: boolean;
+    error: string | null;
+    success: boolean;
+    patch: string | null;
+    prUrl: string | null;
+    kubectlCommand: string | null;
+  }
 
   useEffect(() => {
     fetchData()
@@ -95,6 +111,7 @@ export default function Dashboard() {
 
   async function collectMetrics() {
     setCollecting(true)
+    setMessage(null)
     try {
       if (!API_URL) {
         throw new Error('NEXT_PUBLIC_API_URL environment variable is not set')
@@ -108,17 +125,18 @@ export default function Dashboard() {
       }
       
       const data = await response.json()
-      alert(`Collected metrics for ${data.workloads_processed} workloads`)
+      setMessage(`Collected metrics for ${data.workloads_processed} workloads`)
       fetchData()
     } catch (error) {
       console.error('Error collecting metrics:', error)
-      alert(`Error collecting metrics: ${(error as Error).message}`)
+      setMessage(`Error collecting metrics: ${(error as Error).message}`)
     }
     setCollecting(false)
   }
 
   async function analyzeWorkloads() {
     setAnalyzing(true)
+    setMessage(null)
     try {
       if (!API_URL) {
         throw new Error('NEXT_PUBLIC_API_URL environment variable is not set')
@@ -132,13 +150,91 @@ export default function Dashboard() {
       }
       
       const data = await response.json()
-      alert(`Created ${data.opportunities_created} new opportunities`)
+      setMessage(`Created ${data.opportunities_created} new opportunities`)
       fetchData()
     } catch (error) {
       console.error('Error analyzing workloads:', error)
-      alert(`Error analyzing workloads: ${(error as Error).message}`)
+      setMessage(`Error analyzing workloads: ${(error as Error).message}`)
     }
     setAnalyzing(false)
+  }
+
+  // Add the applyFix function
+  async function applyFix(opportunityId: string) {
+    // Set loading state for this specific opportunity
+    setApplyFixState(prev => ({
+      ...prev,
+      [opportunityId]: {
+        loading: true,
+        error: null,
+        success: false,
+        patch: null,
+        prUrl: null,
+        kubectlCommand: null
+      }
+    }))
+
+    try {
+      const response = await fetch('/api/apply-fix', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          opportunityId,
+          createPr: false // Set to true if you want to create a PR instead
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to apply fix')
+      }
+
+      const data = await response.json()
+
+      // Update state with the result
+      setApplyFixState(prev => ({
+        ...prev,
+        [opportunityId]: {
+          loading: false,
+          error: null,
+          success: true,
+          patch: data.patch,
+          prUrl: data.pr?.url || null,
+          kubectlCommand: data.kubectlCommand || null
+        }
+      }))
+
+      // Show success message
+      setMessage('Fix applied successfully! Check the download prompt.')
+      
+      // If we have a patch, trigger download
+      if (data.patch) {
+        const blob = new Blob([data.patch], { type: 'application/yaml' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `optimization-patch-${opportunityId}.yaml`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      }
+    } catch (error) {
+      console.error('Error applying fix:', error)
+      setApplyFixState(prev => ({
+        ...prev,
+        [opportunityId]: {
+          loading: false,
+          error: (error as Error).message,
+          success: false,
+          patch: null,
+          prUrl: null,
+          kubectlCommand: null
+        }
+      }))
+      setMessage(`Error applying fix: ${(error as Error).message}`)
+    }
   }
 
   const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444']
@@ -176,25 +272,12 @@ export default function Dashboard() {
           <p className="text-gray-600 mt-2">AI-Powered Kubernetes Cost & Carbon Optimization</p>
         </div>
 
-        {/* Action Buttons */}
-        <div className="mb-8 flex gap-4 flex-wrap">
-          <button
-            onClick={collectMetrics}
-            disabled={collecting}
-            className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-          >
-            <Activity size={20} />
-            {collecting ? 'Collecting...' : 'Collect Metrics'}
-          </button>
-          <button
-            onClick={analyzeWorkloads}
-            disabled={analyzing}
-            className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
-          >
-            <Server size={20} />
-            {analyzing ? 'Analyzing...' : 'Analyze Workloads'}
-          </button>
-        </div>
+        {/* Message Notification */}
+        {message && (
+          <div className="mb-6 bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-lg">
+            <p>{message}</p>
+          </div>
+        )}
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -226,6 +309,31 @@ export default function Dashboard() {
             </div>
             <p className="text-3xl font-bold text-gray-900">{stats.workloadCount}</p>
           </div>
+        </div>
+
+        {/* Real-time Metrics */}
+        <div className="mb-8">
+          <RealTimeMetrics />
+        </div>
+
+        {/* Action Buttons */}
+        <div className="mb-8 flex gap-4 flex-wrap">
+          <button
+            onClick={collectMetrics}
+            disabled={collecting}
+            className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+          >
+            <Activity size={20} />
+            {collecting ? 'Collecting...' : 'Collect Metrics'}
+          </button>
+          <button
+            onClick={analyzeWorkloads}
+            disabled={analyzing}
+            className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-2"
+          >
+            <Server size={20} />
+            {analyzing ? 'Analyzing...' : 'Analyze Workloads'}
+          </button>
         </div>
 
         {/* Opportunities List */}
@@ -296,11 +404,18 @@ export default function Dashboard() {
                   </div>
                   
                   <div className="flex gap-2">
-                    <button className="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+                    <button 
+                      onClick={() => router.push(`/opportunities/${opp.id}`)}
+                      className="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                    >
                       View Details
                     </button>
-                    <button className="flex-1 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
-                      Apply Fix
+                    <button 
+                      onClick={() => applyFix(opp.id)}
+                      disabled={applyFixState[opp.id]?.loading}
+                      className="flex-1 bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:opacity-50"
+                    >
+                      {applyFixState[opp.id]?.loading ? 'Applying...' : 'Apply Fix'}
                     </button>
                   </div>
                 </div>

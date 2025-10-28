@@ -57,6 +57,7 @@ export default function RealTimeMetrics() {
     
     ws.onmessage = (event) => {
       try {
+        // Try to parse as JSON first
         const data = JSON.parse(event.data)
         if (data.type === 'metrics_update') {
           // Add new data point
@@ -67,7 +68,8 @@ export default function RealTimeMetrics() {
           })
         }
       } catch (error) {
-        console.error('Error parsing WebSocket message:', error)
+        // If JSON parsing fails, log the message but don't treat it as an error
+        console.log('Received non-JSON message:', event.data)
       }
     }
     

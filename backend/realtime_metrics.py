@@ -57,8 +57,16 @@ async def handle_websocket_connection(websocket: WebSocket):
         while True:
             # Keep the connection alive
             data = await websocket.receive_text()
-            # Echo the message back (can be extended for client commands)
-            await manager.send_personal_message(f"Echo: {data}", websocket)
+            
+            # Handle client commands
+            if data == "collect":
+                # Send acknowledgment that collection has started
+                await manager.send_personal_message("Metrics collection started", websocket)
+                # In a real implementation, this would trigger actual metrics collection
+                # and broadcast the results to all connected clients
+            else:
+                # Echo the message back for other commands
+                await manager.send_personal_message(f"Echo: {data}", websocket)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
         logger.info("Client disconnected")
